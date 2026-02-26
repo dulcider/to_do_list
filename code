@@ -1,0 +1,355 @@
+/*
+ * To-Do List App
+ * ==============
+ * A command-line task manager that saves your tasks to a file
+ * so they persist between sessions.
+ * Demonstrates: file I/O, structs, vectors, user input, enums.
+ *
+ * Compile:  g++ -o todo todo.cpp
+ * Usage:    ./todo
+ */
+
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <iomanip>
+#include <algorithm>
+#include <sstream>
+#include <ctime>
+
+// ─────────────────────────────────────────────
+// COLORS (ANSI — works on Linux/Mac terminals)
+// ─────────────────────────────────────────────
+#ifdef _WIN32
+    #define GREEN  ""
+    #define YELLOW ""
+    #define RED    ""
+    #define CYAN   ""
+    #define BOLD   ""
+    #define GRAY   ""
+    #define RESET  ""
+#else
+    #define GREEN  "\033[92m"
+    #define YELLOW "\033[93m"
+    #define RED    "\033[91m"
+    #define CYAN   "\033[96m"
+    #define BOLD   "\033[1m"
+    #define GRAY   "\033[90m"
+    #define RESET  "\033[0m"
+#endif
+
+// ─────────────────────────────────────────────
+// PRIORITY ENUM
+// ─────────────────────────────────────────────
+
+enum class Priority { LOW, MEDIUM, HIGH };
+
+std::string priorityToString(Priority p) {
+    switch (p) {
+        case Priority::HIGH:   return "HIGH";
+        case Priority::MEDIUM: return "MEDIUM";
+        case Priority::LOW:    return "LOW";
+        default:               return "LOW";
+    }
+}
+
+Priority stringToPriority(const std::string& s) {
+    if (s == "HIGH")   return Priority::HIGH;
+    if (s == "MEDIUM") return Priority::MEDIUM;
+    return Priority::LOW;
+}
+
+std::string priorityColor(Priority p) {
+    switch (p) {
+        case Priority::HIGH:   return RED;
+        case Priority::MEDIUM: return YELLOW;
+        case Priority::LOW:    return GREEN;
+        default:               return RESET;
+    }
+}
+
+// ─────────────────────────────────────────────
+// TASK STRUCT
+// ─────────────────────────────────────────────
+
+struct Task {
+    int         id;
+    std::string title;
+    std::string description;
+    Priority    priority;
+    bool        completed;
+    std::string createdAt;
+
+    Task(int id, const std::string& title, const std::string& desc, Priority p)
+        : id(id), title(title), description(desc), priority(p), completed(false) {
+        // Timestamp
+        std::time_t now = std::time(nullptr);
+        char buf[20];
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", std::localtime(&now));
+        createdAt = buf;
+    }
+
+    Task() : id(0), priority(Priority::LOW), completed(false) {}
+};
+
+// ─────────────────────────────────────────────
+// TODO LIST CLASS
+// ─────────────────────────────────────────────
+
+class TodoList {
+private:
+    std::vector<Task> tasks;
+    std::string       saveFile;
+    int               nextId;
+
+public:
+    TodoList(const std::string& filename = "tasks.dat")
+        : saveFile(filename), nextId(1) {
+        load();
+    }
+
+    // ── Add a task ──────────────────────────
+    void addTask(const std::string& title, const std::string& desc, Priority priority) {
+        tasks.emplace_back(nextId++, title, desc, priority);
+        save();
+        std::cout << GREEN << "[+] Task added! ID: " << (nextId - 1) << RESET << "\n";
+    }
+
+    // ── Complete a task ─────────────────────
+    void completeTask(int id) {
+        for (auto& t : tasks) {
+            if (t.id == id) {
+                if (t.completed) {
+                    std::cout << YELLOW << "[!] Task already completed.\n" << RESET;
+                } else {
+                    t.completed = true;
+                    save();
+                    std::cout << GREEN << "[+] Task " << id << " marked complete!\n" << RESET;
+                }
+                return;
+            }
+        }
+        std::cout << RED << "[!] Task ID " << id << " not found.\n" << RESET;
+    }
+
+    // ── Delete a task ───────────────────────
+    void deleteTask(int id) {
+        auto it = std::remove_if(tasks.begin(), tasks.end(),
+            [id](const Task& t) { return t.id == id; });
+        if (it == tasks.end()) {
+            std::cout << RED << "[!] Task ID " << id << " not found.\n" << RESET;
+        } else {
+            tasks.erase(it, tasks.end());
+            save();
+            std::cout << GREEN << "[+] Task " << id << " deleted.\n" << RESET;
+        }
+    }
+
+    // ── List all tasks ──────────────────────
+    void listTasks(bool showCompleted = true) {
+        if (tasks.empty()) {
+            std::cout << GRAY << "  No tasks yet. Add one!\n" << RESET;
+            return;
+        }
+
+        int shown = 0;
+        std::cout << "\n";
+        std::cout << BOLD << "  ID   STATUS      PRIORITY   TITLE\n" << RESET;
+        std::cout << "  ───  ──────────  ─────────  ─────────────────────────\n";
+
+        // Sort: incomplete first, then by priority (high first), then by id
+        std::vector<Task*> sorted;
+        for (auto& t : tasks) sorted.push_back(&t);
+        std::sort(sorted.begin(), sorted.end(), [](const Task* a, const Task* b) {
+            if (a->completed != b->completed) return !a->completed;
+            if (a->priority != b->priority) return a->priority > b->priority;
+            return a->id < b->id;
+        });
+
+        for (const Task* t : sorted) {
+            if (!showCompleted && t->completed) continue;
+            shown++;
+            std::string status = t->completed
+                ? std::string(GREEN) + "✓ Done    " + RESET
+                : std::string(YELLOW) + "○ Pending " + RESET;
+            std::string pColor = priorityColor(t->priority);
+            std::string pStr   = priorityToString(t->priority);
+
+            std::cout << "  " << std::setw(3) << t->id << "  "
+                      << status << "  "
+                      << pColor << std::setw(8) << pStr << RESET << "   "
+                      << t->title << "\n";
+
+            if (!t->description.empty()) {
+                std::cout << GRAY << "       ↳ " << t->description << RESET << "\n";
+            }
+            std::cout << GRAY << "       Created: " << t->createdAt << RESET << "\n\n";
+        }
+
+        long pending   = std::count_if(tasks.begin(), tasks.end(), [](const Task& t){ return !t.completed; });
+        long completed = std::count_if(tasks.begin(), tasks.end(), [](const Task& t){ return t.completed; });
+        std::cout << GRAY << "  Total: " << tasks.size()
+                  << "  |  Pending: " << pending
+                  << "  |  Completed: " << completed << "\n\n" << RESET;
+    }
+
+    // ── Filter by priority ──────────────────
+    void filterByPriority(Priority p) {
+        std::cout << "\n  Tasks with priority: " << priorityToString(p) << "\n";
+        std::cout << "  ───────────────────────────────────────\n";
+        bool found = false;
+        for (const auto& t : tasks) {
+            if (t.priority == p) {
+                found = true;
+                std::string status = t.completed ? "[done]" : "[todo]";
+                std::cout << "  " << t.id << ". " << status << " " << t.title << "\n";
+            }
+        }
+        if (!found) std::cout << GRAY << "  None found.\n" << RESET;
+        std::cout << "\n";
+    }
+
+    // ── Clear all completed ─────────────────
+    void clearCompleted() {
+        int before = tasks.size();
+        tasks.erase(std::remove_if(tasks.begin(), tasks.end(),
+            [](const Task& t) { return t.completed; }), tasks.end());
+        int removed = before - tasks.size();
+        save();
+        std::cout << GREEN << "[+] Removed " << removed << " completed task(s).\n" << RESET;
+    }
+
+    // ── Save to file ────────────────────────
+    void save() {
+        std::ofstream f(saveFile);
+        f << nextId << "\n";
+        for (const auto& t : tasks) {
+            f << t.id << "|"
+              << t.title << "|"
+              << t.description << "|"
+              << priorityToString(t.priority) << "|"
+              << (t.completed ? "1" : "0") << "|"
+              << t.createdAt << "\n";
+        }
+    }
+
+    // ── Load from file ──────────────────────
+    void load() {
+        std::ifstream f(saveFile);
+        if (!f.is_open()) return;
+
+        f >> nextId;
+        f.ignore();
+        std::string line;
+        while (std::getline(f, line)) {
+            if (line.empty()) continue;
+            std::istringstream ss(line);
+            std::string token;
+            Task t;
+            std::getline(ss, token, '|'); t.id          = std::stoi(token);
+            std::getline(ss, token, '|'); t.title        = token;
+            std::getline(ss, token, '|'); t.description  = token;
+            std::getline(ss, token, '|'); t.priority     = stringToPriority(token);
+            std::getline(ss, token, '|'); t.completed    = (token == "1");
+            std::getline(ss, token, '|'); t.createdAt    = token;
+            tasks.push_back(t);
+        }
+    }
+};
+
+// ─────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────
+
+Priority askPriority() {
+    std::cout << "  Priority (1=Low, 2=Medium, 3=High) [default=2]: ";
+    std::string input;
+    std::getline(std::cin, input);
+    if (input == "1") return Priority::LOW;
+    if (input == "3") return Priority::HIGH;
+    return Priority::MEDIUM;
+}
+
+void printMenu() {
+    std::cout << BOLD << CYAN << "\n  ┌─────────────────────────────┐\n";
+    std::cout << "  │     📝 TO-DO LIST MANAGER   │\n";
+    std::cout << "  └─────────────────────────────┘\n" << RESET;
+    std::cout << "  1. List all tasks\n";
+    std::cout << "  2. Add a task\n";
+    std::cout << "  3. Complete a task\n";
+    std::cout << "  4. Delete a task\n";
+    std::cout << "  5. Filter by priority\n";
+    std::cout << "  6. Clear completed tasks\n";
+    std::cout << "  7. Exit\n";
+    std::cout << "  Choice: ";
+}
+
+// ─────────────────────────────────────────────
+// MAIN
+// ─────────────────────────────────────────────
+
+int main() {
+    TodoList todo("tasks.dat");
+    std::string input;
+
+    std::cout << BOLD << GREEN << "\nWelcome to your To-Do List!\n" << RESET;
+    std::cout << GRAY << "Tasks are auto-saved to tasks.dat\n" << RESET;
+
+    while (true) {
+        printMenu();
+        std::getline(std::cin, input);
+
+        if (input == "1") {
+            todo.listTasks();
+
+        } else if (input == "2") {
+            std::cout << "  Task title: ";
+            std::string title;
+            std::getline(std::cin, title);
+            if (title.empty()) { std::cout << RED << "[!] Title can't be empty.\n" << RESET; continue; }
+
+            std::cout << "  Description (optional): ";
+            std::string desc;
+            std::getline(std::cin, desc);
+
+            Priority p = askPriority();
+            todo.addTask(title, desc, p);
+
+        } else if (input == "3") {
+            todo.listTasks();
+            std::cout << "  Enter task ID to complete: ";
+            std::string idStr;
+            std::getline(std::cin, idStr);
+            try { todo.completeTask(std::stoi(idStr)); }
+            catch (...) { std::cout << RED << "[!] Invalid ID.\n" << RESET; }
+
+        } else if (input == "4") {
+            todo.listTasks();
+            std::cout << "  Enter task ID to delete: ";
+            std::string idStr;
+            std::getline(std::cin, idStr);
+            try { todo.deleteTask(std::stoi(idStr)); }
+            catch (...) { std::cout << RED << "[!] Invalid ID.\n" << RESET; }
+
+        } else if (input == "5") {
+            std::cout << "  Filter by (1=Low, 2=Medium, 3=High): ";
+            std::string pStr;
+            std::getline(std::cin, pStr);
+            Priority p = (pStr == "1") ? Priority::LOW : (pStr == "3") ? Priority::HIGH : Priority::MEDIUM;
+            todo.filterByPriority(p);
+
+        } else if (input == "6") {
+            todo.clearCompleted();
+
+        } else if (input == "7" || input == "q" || input == "quit") {
+            std::cout << GREEN << "\nGoodbye!\n\n" << RESET;
+            break;
+
+        } else {
+            std::cout << YELLOW << "[!] Invalid choice. Enter 1-7.\n" << RESET;
+        }
+    }
+
+    return 0;
+}
